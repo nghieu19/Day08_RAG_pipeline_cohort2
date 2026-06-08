@@ -1,0 +1,8 @@
+{
+  "vector_store": "local_jsonl",
+  "chunk_count": 1195,
+  "embedding_model": "local-hashing-384",
+  "embedding_dim": 384,
+  "chunks_path": "D:\\Day08_RAG_pipeline_cohort2\\data\\index\\chunks.jsonl",
+  "vector_index_path": "D:\\Day08_RAG_pipeline_cohort2\\data\\index\\vector_index.jsonl"
+}

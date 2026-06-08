@@ -1,66 +1,90 @@
 """
-Task 5 — Semantic Search Module.
+Task 5 - Semantic search over the local vector index from Task 4.
 
-Viết module tìm kiếm ngữ nghĩa (dense retrieval) trên vector store.
-
-Yêu cầu:
-    - Input: query string + top_k
-    - Output: danh sách chunks có score, sorted descending
-    - Phải tương thích với embedding model và vector store ở Task 4
+The Task 4 index is stored at data/index/vector_index.jsonl. Each line contains
+one chunk, its metadata, and a normalized local-hashing embedding. This module
+embeds the query with the same function and ranks chunks by cosine similarity.
 """
+
+from __future__ import annotations
+
+import json
+import math
+from functools import lru_cache
+
+from src.task4_chunking_indexing import (
+    VECTOR_INDEX_PATH,
+    _hash_embedding,
+    run_pipeline,
+)
+
+
+@lru_cache(maxsize=1)
+def _load_vector_index() -> tuple[dict, ...]:
+    """Load the local JSONL vector index, building it first if needed."""
+    if not VECTOR_INDEX_PATH.exists() or VECTOR_INDEX_PATH.stat().st_size == 0:
+        run_pipeline()
+
+    records: list[dict] = []
+    with VECTOR_INDEX_PATH.open("r", encoding="utf-8") as file:
+        for line in file:
+            line = line.strip()
+            if line:
+                records.append(json.loads(line))
+
+    return tuple(records)
+
+
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
+    """Cosine similarity; works even if vectors are not pre-normalized."""
+    if not left or not right:
+        return 0.0
+
+    dot = sum(a * b for a, b in zip(left, right))
+    left_norm = math.sqrt(sum(value * value for value in left))
+    right_norm = math.sqrt(sum(value * value for value in right))
+    if left_norm == 0 or right_norm == 0:
+        return 0.0
+    return dot / (left_norm * right_norm)
 
 
 def semantic_search(query: str, top_k: int = 10) -> list[dict]:
     """
-    Tìm kiếm ngữ nghĩa sử dụng vector similarity.
+    Search chunks using vector similarity.
 
     Args:
-        query: Câu truy vấn
-        top_k: Số lượng kết quả tối đa
+        query: User query.
+        top_k: Maximum number of results.
 
     Returns:
-        List of {
-            'content': str,      # Nội dung chunk
-            'score': float,      # Cosine similarity score
-            'metadata': dict     # source, doc_type, chunk_index
-        }
-        Sorted by score descending.
+        List of {'content': str, 'score': float, 'metadata': dict}, sorted by
+        score descending.
     """
-    # TODO: Implement semantic search
-    #
-    # Bước 1: Embed query bằng cùng model ở Task 4
-    # Bước 2: Query vector store (cosine similarity)
-    # Bước 3: Return top_k results
-    #
-    # Ví dụ với Weaviate:
-    # import weaviate
-    # from sentence_transformers import SentenceTransformer
-    #
-    # model = SentenceTransformer("BAAI/bge-m3")
-    # query_embedding = model.encode(query).tolist()
-    #
-    # client = weaviate.connect_to_local()
-    # collection = client.collections.get("DrugLawDocs")
-    #
-    # results = collection.query.near_vector(
-    #     near_vector=query_embedding,
-    #     limit=top_k,
-    #     return_metadata=MetadataQuery(distance=True)
-    # )
-    #
-    # return [
-    #     {
-    #         "content": obj.properties["content"],
-    #         "score": 1 - obj.metadata.distance,  # distance → similarity
-    #         "metadata": {"source": obj.properties["source"], ...}
-    #     }
-    #     for obj in results.objects
-    # ]
-    raise NotImplementedError("Implement semantic_search")
+    if top_k <= 0:
+        return []
+
+    query = (query or "").strip()
+    if not query:
+        return []
+
+    query_embedding = _hash_embedding(query)
+    results: list[dict] = []
+
+    for record in _load_vector_index():
+        score = _cosine_similarity(query_embedding, record.get("embedding", []))
+        results.append(
+            {
+                "content": record.get("content", ""),
+                "score": float(score),
+                "metadata": record.get("metadata", {}),
+            }
+        )
+
+    results.sort(key=lambda item: item["score"], reverse=True)
+    return results[:top_k]
 
 
 if __name__ == "__main__":
-    # Test
-    results = semantic_search("hình phạt cho tội tàng trữ ma tuý", top_k=5)
-    for r in results:
-        print(f"[{r['score']:.3f}] {r['content'][:100]}...")
+    results = semantic_search("hinh phat cho toi tang tru ma tuy", top_k=5)
+    for result in results:
+        print(f"[{result['score']:.3f}] {result['content'][:100]}...")
